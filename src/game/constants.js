@@ -6,11 +6,11 @@ export const GRID_ROWS = 14;
 export const CANVAS_WIDTH = TILE_SIZE * GRID_COLS;   // 800
 export const CANVAS_HEIGHT = TILE_SIZE * GRID_ROWS;  // 560
 
-export const GRAVITY = 0.6;
-export const PLAYER_SPEED = 3;
-export const JUMP_FORCE = -10;
-export const CLIMB_SPEED = 2.5;
-export const ROPE_SPEED = 3;
+export const GRAVITY = 0.35;
+export const PLAYER_SPEED = 1.5;
+export const JUMP_FORCE = -5;
+export const CLIMB_SPEED = 1.25;
+export const ROPE_SPEED = 1.5;
 
 export const TILE = {
   EMPTY: 0,

@@ -1,4 +1,4 @@
-import { TILE_SIZE, GRAVITY, PLAYER_SPEED, JUMP_FORCE, CLIMB_SPEED, ROPE_SPEED, PLAYER_STATE, DIRECTION, TILE } from './constants';
+import { TILE_SIZE, GRAVITY, PLAYER_SPEED, CLIMB_SPEED, PLAYER_STATE, DIRECTION, TILE } from './constants';
 
 export class Player {
   constructor(gridX, gridY) {
@@ -6,6 +6,7 @@ export class Player {
     this.y = gridY * TILE_SIZE;
     this.vx = 0;
     this.vy = 0;
+    this.prevY = this.y;
     this.width = TILE_SIZE * 0.75;
     this.height = TILE_SIZE * 0.9;
     this.state = PLAYER_STATE.FALLING;
@@ -21,6 +22,9 @@ export class Player {
   update(keys, grid, onDig) {
     if (!this.alive) return;
 
+    // Save previous position for landing detection
+    this.prevY = this.y;
+
     // Handle digging
     if (this.digTimer > 0) {
       this.digTimer--;
@@ -34,8 +38,6 @@ export class Player {
     }
 
     // Determine state
-    const centerCol = Math.floor((this.x + this.width / 2) / TILE_SIZE);
-    const bodyRow = Math.floor((this.y + this.height / 2) / TILE_SIZE);
     const onLadder = this.isTouchingLadder(grid);
     const onRope = this.isOnRope(grid);
 
@@ -105,7 +107,7 @@ export class Player {
     this.x += this.vx;
     this.resolveHorizontalCollision(grid);
 
-    // Gravity check
+    // Ground check - if no solid below, start falling
     if (!this.isOnSolid(grid)) {
       this.state = PLAYER_STATE.FALLING;
       this.onGround = false;
@@ -128,6 +130,11 @@ export class Player {
       this.direction = DIRECTION.RIGHT;
     }
 
+    // While climbing up/down with no horizontal input, center on the ladder
+    if (!keys.left && !keys.right && (keys.up || keys.down)) {
+      this.snapToLadderCenter(grid);
+    }
+
     this.x += this.vx;
     this.y += this.vy;
 
@@ -145,12 +152,60 @@ export class Player {
       }
     }
 
+    // Reached top of ladder — landing on platform above
+    if (this.vy < 0 && this.isOnSolid(grid)) {
+      this.state = PLAYER_STATE.RUNNING;
+      this.onGround = true;
+      this.vy = 0;
+      this.snapToGround(grid);
+    }
+
     // Landed on ground while climbing down
     if (this.isOnSolid(grid) && this.vy >= 0) {
       this.state = PLAYER_STATE.RUNNING;
       this.onGround = true;
       this.vy = 0;
       this.snapToGround(grid);
+    }
+  }
+
+  // Snap player to the center of the ladder tile they are on
+  snapToLadderCenter(grid) {
+    const centerX = this.x + this.width / 2;
+    const topY = this.y + 2;
+    const bottomY = this.y + this.height - 2;
+    const col = Math.floor(centerX / TILE_SIZE);
+    const rowTop = Math.floor(topY / TILE_SIZE);
+    const rowBot = Math.floor(bottomY / TILE_SIZE);
+
+    // Find the ladder column the player is currently on
+    let ladderCol = -1;
+    // First check the player's current column
+    for (let r = rowTop; r <= rowBot; r++) {
+      if (this.getTileAt(col, r, grid) === TILE.LADDER) {
+        ladderCol = col;
+        break;
+      }
+    }
+    // If not on current column, check neighbors
+    if (ladderCol < 0) {
+      for (let c = col - 1; c <= col + 1; c++) {
+        if (c < 0 || c >= grid[0].length) continue;
+        for (let r = rowTop; r <= rowBot; r++) {
+          if (this.getTileAt(c, r, grid) === TILE.LADDER) {
+            ladderCol = c;
+            break;
+          }
+        }
+        if (ladderCol >= 0) break;
+      }
+    }
+
+    if (ladderCol >= 0) {
+      // Center the player horizontally on the ladder tile
+      const targetX = ladderCol * TILE_SIZE + (TILE_SIZE - this.width) / 2;
+      // Smooth interpolation toward center
+      this.x += (targetX - this.x) * 0.3;
     }
   }
 
@@ -188,7 +243,7 @@ export class Player {
 
   handleFalling(keys, grid) {
     this.vy += GRAVITY;
-    if (this.vy > 12) this.vy = 12;
+    if (this.vy > 8) this.vy = 8;
 
     if (keys.left) {
       this.vx = -PLAYER_SPEED * 0.7;
@@ -207,14 +262,16 @@ export class Player {
       return;
     }
 
+    const prevBottom = this.prevY + this.height;
     this.x += this.vx;
     this.y += this.vy;
 
     this.resolveHorizontalCollision(grid);
 
-    // Landing check
-    if (this.isOnSolid(grid)) {
-      this.snapToGround(grid);
+    // Landing check using previous position for reliable detection
+    const landingResult = this.checkLanding(grid, prevBottom);
+    if (landingResult) {
+      this.y = landingResult.tileTop - this.height;
       this.state = PLAYER_STATE.RUNNING;
       this.onGround = true;
       this.vy = 0;
@@ -227,9 +284,52 @@ export class Player {
     }
   }
 
+  // Reliable landing detection: check if player crossed a solid tile top
+  checkLanding(grid, prevBottom) {
+    const bottom = this.y + this.height;
+    const left = this.x + 2;
+    const right = this.x + this.width - 2;
+    const colL = Math.floor(left / TILE_SIZE);
+    const colR = Math.floor(right / TILE_SIZE);
+
+    // Check the row where the bottom now is
+    const row = Math.floor(bottom / TILE_SIZE);
+
+    for (let c = colL; c <= colR; c++) {
+      const tile = this.getTileAt(c, row, grid);
+      if (tile === TILE.BRICK || tile === TILE.DIGGABLE) {
+        const tileTop = row * TILE_SIZE;
+        // Previous bottom was at or above tile top, now below it
+        if (prevBottom <= tileTop + 1 && bottom > tileTop) {
+          return { tileTop };
+        }
+        // Also catch the case where player is within small tolerance
+        if (bottom > tileTop && bottom <= tileTop + 2) {
+          return { tileTop };
+        }
+      }
+    }
+
+    // Check one row above too (in case we're exactly at boundary)
+    if (row > 0) {
+      const rowAbove = row - 1;
+      for (let c = colL; c <= colR; c++) {
+        const tile = this.getTileAt(c, rowAbove, grid);
+        if (tile === TILE.BRICK || tile === TILE.DIGGABLE) {
+          const tileTop = rowAbove * TILE_SIZE;
+          if (bottom >= tileTop && bottom <= tileTop + 2) {
+            return { tileTop };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
   startDig(dir, grid, onDig) {
     const col = Math.floor((this.x + this.width / 2) / TILE_SIZE) + dir;
-    const row = Math.floor((this.y + this.height - 1) / TILE_SIZE) + 1; // row below feet
+    const row = Math.floor((this.y + this.height - 1) / TILE_SIZE) + 1;
 
     if (row >= 0 && row < grid.length && col >= 0 && col < grid[0].length) {
       const tile = grid[row][col];
@@ -262,7 +362,6 @@ export class Player {
 
   isOnSolid(grid) {
     const bottom = this.y + this.height;
-    // Check with a small tolerance above the exact tile boundary
     const row = Math.floor(bottom / TILE_SIZE);
     const left = this.x + 2;
     const right = this.x + this.width - 2;
@@ -272,9 +371,9 @@ export class Player {
     for (let c = colL; c <= colR; c++) {
       const tile = this.getTileAt(c, row, grid);
       if (tile === TILE.BRICK || tile === TILE.DIGGABLE) {
-        // Player bottom must be within tolerance of tile top
+        // Player bottom must be very close to tile top (standing on it)
         const tileTop = row * TILE_SIZE;
-        if (bottom >= tileTop && bottom <= tileTop + TILE_SIZE * 0.15) {
+        if (bottom >= tileTop && bottom <= tileTop + 2) {
           return true;
         }
       }
@@ -285,7 +384,6 @@ export class Player {
   isOnRope(grid) {
     const centerX = this.x + this.width / 2;
     const col = Math.floor(centerX / TILE_SIZE);
-    // Check at player's upper body region (rope is at top of tile)
     for (let offsetY = 2; offsetY < this.height * 0.6; offsetY += 4) {
       const row = Math.floor((this.y + offsetY) / TILE_SIZE);
       if (this.getTileAt(col, row, grid) === TILE.ROPE) return true;
@@ -300,7 +398,6 @@ export class Player {
   }
 
   resolveHorizontalCollision(grid) {
-    // Use the full player height for collision, minus small margin at top
     const top = this.y + 2;
     const bottom = this.y + this.height - 2;
     const rowTop = Math.floor(top / TILE_SIZE);

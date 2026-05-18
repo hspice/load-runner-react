@@ -1,102 +1,320 @@
-import { TILE_SIZE, GRAVITY, PLAYER_SPEED, CLIMB_SPEED, TILE } from './constants';
+import { TILE_SIZE, GRAVITY, PLAYER_SPEED, CLIMB_SPEED, TILE, GRID_ROWS } from './constants';
+
+const ENEMY_SPEED = PLAYER_SPEED * 0.55;
+const ENEMY_CLIMB_SPEED = CLIMB_SPEED * 0.7;
 
 export class Enemy {
   constructor(gridX, gridY) {
     this.x = gridX * TILE_SIZE;
     this.y = gridY * TILE_SIZE;
-    this.vx = -PLAYER_SPEED * 0.5;
+    this.vx = 0;
     this.vy = 0;
+    this.prevY = this.y;
     this.width = TILE_SIZE * 0.75;
     this.height = TILE_SIZE * 0.9;
-    this.direction = -1;
+    this.direction = -1; // -1 = left, 1 = right
     this.alive = true;
     this.frame = 0;
     this.frameTimer = 0;
-    this.climbingTimer = 0;
+    this.isClimbing = false;
+    this.climbTargetRow = -1; // target row when climbing
+    this.patrolDir = -1; // for horizontal patrol when no path to player
+    this.patrolTimer = 0;
   }
 
   update(grid, playerX, playerY) {
     if (!this.alive) return;
 
-    const centerCol = Math.floor((this.x + this.width / 2) / TILE_SIZE);
-    const bodyRow = Math.floor((this.y + this.height / 2) / TILE_SIZE);
+    this.prevY = this.y;
+
+    // Current state detection
     const onLadder = this.isTouchingLadder(grid);
     const onSolid = this.isOnSolid(grid);
+    const onRope = this.isOnRope(grid);
 
-    // Falling
-    if (!onSolid && !onLadder) {
+    const dx = playerX - (this.x + this.width / 2);
+    const dy = playerY - (this.y + this.height / 2);
+    const playerRow = Math.floor(playerY / TILE_SIZE);
+    const enemyRow = Math.floor((this.y + this.height) / TILE_SIZE);
+    const sameFloor = Math.abs(dy) < TILE_SIZE * 1.2;
+
+    // ---- FALLING ----
+    if (!onSolid && !onLadder && !onRope && !this.isClimbing) {
       this.vy += GRAVITY;
-      if (this.vy > 12) this.vy = 12;
+      if (this.vy > 8) this.vy = 8;
+
+      const prevBottom = this.prevY + this.height;
       this.y += this.vy;
-      this.x += this.vx * 0.3;
+      this.x += this.direction * PLAYER_SPEED * 0.3;
       this.resolveHorizontalCollision(grid);
 
-      if (this.isOnSolid(grid)) {
-        this.snapToGround(grid);
+      const landingResult = this.checkLanding(grid, prevBottom);
+      if (landingResult) {
+        this.y = landingResult.tileTop - this.height;
         this.vy = 0;
       }
-      // Grab rope while falling
-      if (this.isOnRope(grid) && this.vy > 0) {
-        this.vy = 0;
-      }
-      // Fall off map
-      if (this.y > TILE_SIZE * 14 + TILE_SIZE) {
+
+      if (this.y > TILE_SIZE * (GRID_ROWS + 1)) {
         this.alive = false;
       }
+      this.updateAnimation();
       return;
     }
 
-    // On solid ground or ladder
-    this.vy = 0;
-
-    // AI: decide direction towards player
-    const dx = playerX - this.x;
-    const dy = playerY - this.y;
-    this.direction = dx > 0 ? 1 : -1;
-
-    // Try to use ladder if player is on a different row
-    if (onLadder && Math.abs(dy) > TILE_SIZE) {
-      this.climbingTimer = 30;
-      this.vy = dy < 0 ? -CLIMB_SPEED * 0.8 : CLIMB_SPEED * 0.8;
-      this.y += this.vy;
-
-      // Check if still on ladder
-      if (!this.isTouchingLadder(grid) && this.vy < 0) {
-        this.y -= this.vy;
-        this.vy = 0;
-        this.climbingTimer = 0;
-      }
-
-      // Landed on ground while climbing down
-      if (this.isOnSolid(grid) && this.vy > 0) {
-        this.snapToGround(grid);
-        this.vy = 0;
-        this.climbingTimer = 0;
-      }
-    }
-
-    if (this.climbingTimer > 0) {
-      this.climbingTimer--;
-    } else {
-      // Horizontal movement
-      this.vx = this.direction * PLAYER_SPEED * 0.5;
+    // ---- ON ROPE ----
+    if (onRope && !this.isClimbing) {
+      this.vy = 0;
+      // Move horizontally on rope toward player
+      this.vx = (dx > 0 ? 1 : -1) * ENEMY_SPEED;
+      this.direction = dx > 0 ? 1 : -1;
       this.x += this.vx;
       this.resolveHorizontalCollision(grid);
 
-      // If hit a wall and on ladder, start climbing
-      if (this.vx === 0 && onLadder) {
-        this.climbingTimer = 30;
-        this.vy = -CLIMB_SPEED * 0.8;
+      // Drop off rope if player is below
+      if (dy > 0) {
+        // Player is below - drop
+      }
+
+      // Check if still on rope
+      if (!this.isOnRope(grid)) {
+        this.vy = 0;
+      }
+
+      // Can grab ladder from rope
+      if (onLadder && dy < -TILE_SIZE) {
+        this.isClimbing = true;
+        this.climbTargetRow = playerRow;
+      }
+
+      this.updateAnimation();
+      return;
+    }
+
+    // ---- CLIMBING LADDER ----
+    if (this.isClimbing) {
+      this.vy = dy < 0 ? -ENEMY_CLIMB_SPEED : ENEMY_CLIMB_SPEED;
+      this.y += this.vy;
+
+      // Snap to ladder center while climbing
+      this.snapToLadderCenter(grid);
+
+      // Reached solid ground while climbing
+      if (this.isOnSolid(grid)) {
+        // Check if we should step off the ladder
+        const shouldStepOff = sameFloor ||
+          (this.vy > 0 && enemyRow >= playerRow) ||  // going down, reached player's row or below
+          (this.vy < 0 && enemyRow <= playerRow);     // going up, reached player's row or above
+
+        if (shouldStepOff || !this.isTouchingLadder(grid)) {
+          this.snapToGround(grid);
+          this.vy = 0;
+          this.vx = 0;
+          this.isClimbing = false;
+          this.climbTargetRow = -1;
+          // Immediately start walking toward player
+          this.direction = dx > 0 ? 1 : -1;
+          this.vx = this.direction * ENEMY_SPEED;
+          this.x += this.vx;
+          this.resolveHorizontalCollision(grid);
+        }
+      }
+
+      // Off the ladder without solid ground — stop climbing
+      if (!this.isTouchingLadder(grid) && !this.isOnSolid(grid)) {
+        this.y -= this.vy;
+        this.vy = 0;
+        this.isClimbing = false;
+        this.climbTargetRow = -1;
+      }
+
+      this.updateAnimation();
+      return;
+    }
+
+    // ---- ON SOLID GROUND (walking) ----
+    this.vy = 0;
+
+    if (sameFloor) {
+      // Same floor as player — chase directly
+      this.direction = dx > 0 ? 1 : -1;
+      this.vx = this.direction * ENEMY_SPEED;
+      this.x += this.vx;
+      this.resolveHorizontalCollision(grid);
+
+      // Hit a wall while chasing — try climbing or reverse
+      if (this.vx === 0) {
+        if (onLadder) {
+          this.isClimbing = true;
+          this.climbTargetRow = playerRow;
+          this.vy = dy < 0 ? -ENEMY_CLIMB_SPEED : ENEMY_CLIMB_SPEED;
+          this.y += this.vy;
+        } else {
+          this.direction = -this.direction;
+          this.vx = this.direction * ENEMY_SPEED;
+          this.x += this.vx;
+          this.resolveHorizontalCollision(grid);
+        }
+      }
+
+      // Reached a ladder and player is on different floor — climb
+      if (onLadder && !sameFloor) {
+        this.isClimbing = true;
+        this.climbTargetRow = playerRow;
+        this.vy = dy < 0 ? -ENEMY_CLIMB_SPEED : ENEMY_CLIMB_SPEED;
         this.y += this.vy;
+      }
+    } else {
+      // Different floor from player — need to find a ladder
+      if (onLadder) {
+        // Standing on a ladder — start climbing
+        this.isClimbing = true;
+        this.climbTargetRow = playerRow;
+        this.vy = dy < 0 ? -ENEMY_CLIMB_SPEED : ENEMY_CLIMB_SPEED;
+        this.y += this.vy;
+      } else {
+        // No ladder here — walk to find one
+        const ladderDir = this.findLadderDirection(grid, dx);
+
+        if (ladderDir !== 0) {
+          this.direction = ladderDir;
+        } else {
+          // No ladder found nearby — patrol
+          this.patrolTimer++;
+          if (this.patrolTimer > 60 || this.vx === 0) {
+            this.patrolDir = -this.patrolDir;
+            this.patrolTimer = 0;
+          }
+          this.direction = this.patrolDir;
+        }
+
+        this.vx = this.direction * ENEMY_SPEED;
+        this.x += this.vx;
+        this.resolveHorizontalCollision(grid);
+
+        // Hit a wall — reverse
+        if (this.vx === 0) {
+          this.direction = -this.direction;
+          this.vx = this.direction * ENEMY_SPEED;
+          this.x += this.vx;
+          this.resolveHorizontalCollision(grid);
+        }
+
+        // If we just walked onto a ladder, start climbing
+        if (this.isTouchingLadder(grid)) {
+          this.isClimbing = true;
+          this.climbTargetRow = playerRow;
+          this.vy = dy < 0 ? -ENEMY_CLIMB_SPEED : ENEMY_CLIMB_SPEED;
+          this.y += this.vy;
+        }
       }
     }
 
-    // Animation
+    this.updateAnimation();
+  }
+
+  updateAnimation() {
     this.frameTimer++;
     if (this.frameTimer > 10) {
       this.frameTimer = 0;
       this.frame = (this.frame + 1) % 2;
     }
+  }
+
+  // Find the direction to the nearest ladder, preferring toward the player
+  findLadderDirection(grid, dxToPlayer) {
+    const centerX = this.x + this.width / 2;
+    const bottomY = this.y + this.height;
+    const currentCol = Math.floor(centerX / TILE_SIZE);
+    const currentRow = Math.floor(bottomY / TILE_SIZE);
+    const preferredDir = dxToPlayer > 0 ? 1 : -1;
+
+    // Search in preferred direction first (up to 8 tiles), then opposite
+    const dirs = [preferredDir, -preferredDir];
+    for (const dir of dirs) {
+      for (let offset = 1; offset <= 8; offset++) {
+        const checkCol = currentCol + dir * offset;
+        if (checkCol < 0 || checkCol >= grid[0].length) continue;
+        // Check current row and rows around for ladder
+        for (let r = Math.max(0, currentRow - 2); r <= Math.min(grid.length - 1, currentRow + 1); r++) {
+          if (grid[r][checkCol] === TILE.LADDER) {
+            return dir;
+          }
+        }
+      }
+    }
+    return 0; // No ladder found
+  }
+
+  // Snap enemy to the center of the ladder tile they are on
+  snapToLadderCenter(grid) {
+    const centerX = this.x + this.width / 2;
+    const topY = this.y + 2;
+    const bottomY = this.y + this.height - 2;
+    const col = Math.floor(centerX / TILE_SIZE);
+    const rowTop = Math.floor(topY / TILE_SIZE);
+    const rowBot = Math.floor(bottomY / TILE_SIZE);
+
+    let ladderCol = -1;
+    for (let r = rowTop; r <= rowBot; r++) {
+      if (this.getTileAt(col, r, grid) === TILE.LADDER) {
+        ladderCol = col;
+        break;
+      }
+    }
+    if (ladderCol < 0) {
+      for (let c = col - 1; c <= col + 1; c++) {
+        if (c < 0 || c >= grid[0].length) continue;
+        for (let r = rowTop; r <= rowBot; r++) {
+          if (this.getTileAt(c, r, grid) === TILE.LADDER) {
+            ladderCol = c;
+            break;
+          }
+        }
+        if (ladderCol >= 0) break;
+      }
+    }
+
+    if (ladderCol >= 0) {
+      const targetX = ladderCol * TILE_SIZE + (TILE_SIZE - this.width) / 2;
+      this.x += (targetX - this.x) * 0.3;
+    }
+  }
+
+  checkLanding(grid, prevBottom) {
+    const bottom = this.y + this.height;
+    const left = this.x + 2;
+    const right = this.x + this.width - 2;
+    const colL = Math.floor(left / TILE_SIZE);
+    const colR = Math.floor(right / TILE_SIZE);
+    const row = Math.floor(bottom / TILE_SIZE);
+
+    for (let c = colL; c <= colR; c++) {
+      const tile = this.getTileAt(c, row, grid);
+      if (tile === TILE.BRICK || tile === TILE.DIGGABLE) {
+        const tileTop = row * TILE_SIZE;
+        if (prevBottom <= tileTop + 1 && bottom > tileTop) {
+          return { tileTop };
+        }
+        if (bottom > tileTop && bottom <= tileTop + 2) {
+          return { tileTop };
+        }
+      }
+    }
+
+    if (row > 0) {
+      const rowAbove = row - 1;
+      for (let c = colL; c <= colR; c++) {
+        const tile = this.getTileAt(c, rowAbove, grid);
+        if (tile === TILE.BRICK || tile === TILE.DIGGABLE) {
+          const tileTop = rowAbove * TILE_SIZE;
+          if (bottom >= tileTop && bottom <= tileTop + 2) {
+            return { tileTop };
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
   getTileAt(col, row, grid) {
@@ -131,7 +349,7 @@ export class Enemy {
       const tile = this.getTileAt(c, row, grid);
       if (tile === TILE.BRICK || tile === TILE.DIGGABLE) {
         const tileTop = row * TILE_SIZE;
-        if (bottom >= tileTop && bottom <= tileTop + TILE_SIZE * 0.15) {
+        if (bottom >= tileTop && bottom <= tileTop + 2) {
           return true;
         }
       }

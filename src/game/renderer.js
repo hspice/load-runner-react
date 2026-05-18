@@ -342,9 +342,9 @@ export function render(ctx, gameState) {
     ctx.lineWidth = 1;
     ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
 
-    // Regeneration indicator
-    if (hole.timer < 60) {
-      const progress = 1 - hole.timer / 60;
+  // Regeneration indicator (starts filling in last ~90 frames of 270)
+  if (hole.timer < 90) {
+    const progress = 1 - hole.timer / 90;
       ctx.fillStyle = `rgba(192, 57, 43, ${progress * 0.5})`;
       ctx.fillRect(x, y, TILE_SIZE * progress, TILE_SIZE);
     }

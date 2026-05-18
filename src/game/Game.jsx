@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { CANVAS_WIDTH, CANVAS_HEIGHT, TILE, TILE_SIZE, PLAYER_STATE } from './constants';
+import { CANVAS_WIDTH, CANVAS_HEIGHT, TILE, TILE_SIZE, PLAYER_STATE, GRID_ROWS } from './constants';
 import { levels, parseLevel } from './levels';
 import { Player } from './Player';
 import { Enemy, checkCollision } from './Enemy';
@@ -199,7 +199,7 @@ export default function Game() {
         if (digY >= 0 && digY < grid.length && digX >= 0 && digX < grid[0].length) {
           const originalTile = grid[digY][digX];
           grid[digY][digX] = TILE.EMPTY;
-          game.dugHoles.push({ x: digX, y: digY, timer: 180, originalTile });
+          game.dugHoles.push({ x: digX, y: digY, timer: 270, originalTile });
           game.score += 10;
         }
       };
@@ -207,14 +207,48 @@ export default function Game() {
       // Update player
       player.update(game.keys, grid, onDig);
 
-      // Safety: if player falls below the map, respawn
-      if (player.y > CANVAS_HEIGHT + TILE_SIZE) {
-        player.alive = false;
-        game.lives--;
-        game.state = GAME_STATE.DEAD;
-        game.deathTimer = 60;
-        return;
-      }
+  // Safety: if player falls below the map, respawn
+  if (player.y > CANVAS_HEIGHT + TILE_SIZE) {
+    player.alive = false;
+    game.lives--;
+    game.state = GAME_STATE.DEAD;
+    game.deathTimer = 60;
+    return;
+  }
+
+  // Check if player is stuck in a dug hole at the bottom row
+  // (can't go down any further, no way to escape)
+  if (player.onGround && player.state === PLAYER_STATE.RUNNING) {
+    const playerBottom = player.y + player.height;
+    const bottomRow = Math.floor(playerBottom / TILE_SIZE);
+    const playerColL = Math.floor((player.x + 2) / TILE_SIZE);
+    const playerColR = Math.floor((player.x + player.width - 2) / TILE_SIZE);
+    const playerCol = Math.floor((player.x + player.width / 2) / TILE_SIZE);
+
+    // Check if player is in a hole (surrounded by solid on left, right, and above)
+    const leftSolid = playerColL > 0 && (grid[bottomRow][playerColL - 1] === TILE.BRICK || grid[bottomRow][playerColL - 1] === TILE.DIGGABLE);
+    const rightSolid = playerColR < grid[0].length - 1 && (grid[bottomRow][playerColR + 1] === TILE.BRICK || grid[bottomRow][playerColR + 1] === TILE.DIGGABLE);
+
+    // Check if there's a solid tile directly above the player (ceiling)
+    const topRow = Math.floor(player.y / TILE_SIZE);
+    const ceilingSolid = topRow >= 0 && (grid[topRow][playerCol] === TILE.BRICK || grid[topRow][playerCol] === TILE.DIGGABLE);
+
+    // Check if there's a ladder nearby (escape route)
+    const hasLadder = player.isTouchingLadder(grid);
+
+    // Check if this is the bottom row (row 12 = above the floor)
+    // or if the tile below the current standing tile is the bottom floor
+    const isBottomArea = bottomRow >= GRID_ROWS - 2;
+
+    // If stuck in a hole at the bottom with walls on both sides, no ladder, and ceiling above
+    if (leftSolid && rightSolid && ceilingSolid && !hasLadder && isBottomArea) {
+      player.alive = false;
+      game.lives--;
+      game.state = GAME_STATE.DEAD;
+      game.deathTimer = 60;
+      return;
+    }
+  }
 
       // Check gold collection
       goldPositions.forEach(gold => {
