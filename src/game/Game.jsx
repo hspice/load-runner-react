@@ -182,17 +182,34 @@ export default function Game() {
       const { player, enemies, grid, goldPositions, exitPos } = game;
       if (!player || !player.alive) return;
 
-      // Update dug holes (regenerate after timer)
-      game.dugHoles = game.dugHoles.filter(hole => {
-        hole.timer--;
-        if (hole.timer <= 0) {
-          if (grid[hole.y] && grid[hole.y][hole.x] === TILE.EMPTY) {
-            grid[hole.y][hole.x] = hole.originalTile;
-          }
-          return false;
-        }
-        return true;
-      });
+ // Update dug holes (regenerate after timer)
+ game.dugHoles = game.dugHoles.filter(hole => {
+ hole.timer--;
+ if (hole.timer <= 0) {
+ // Check if player is standing in the hole that's about to be filled
+ const holeX = hole.x * TILE_SIZE;
+ const holeY = hole.y * TILE_SIZE;
+ const px = player.x + player.width / 2;
+ const py = player.y + player.height / 2;
+ const playerCol = Math.floor(px / TILE_SIZE);
+ const playerRow = Math.floor(py / TILE_SIZE);
+ const playerBottomRow = Math.floor((player.y + player.height - 1) / TILE_SIZE);
+
+ // If player's center or feet are in this hole column/row, they get trapped
+ if (playerCol === hole.x && (playerRow === hole.y || playerBottomRow === hole.y)) {
+ player.alive = false;
+ game.lives--;
+ game.state = GAME_STATE.DEAD;
+ game.deathTimer = 60;
+ }
+
+ if (grid[hole.y] && grid[hole.y][hole.x] === TILE.EMPTY) {
+ grid[hole.y][hole.x] = hole.originalTile;
+ }
+ return false;
+ }
+ return true;
+ });
 
       // Player dig callback
       const onDig = (digX, digY) => {

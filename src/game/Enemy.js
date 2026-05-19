@@ -38,28 +38,41 @@ export class Enemy {
     const enemyRow = Math.floor((this.y + this.height) / TILE_SIZE);
     const sameFloor = Math.abs(dy) < TILE_SIZE * 1.2;
 
-    // ---- FALLING ----
-    if (!onSolid && !onLadder && !onRope && !this.isClimbing) {
-      this.vy += GRAVITY;
-      if (this.vy > 8) this.vy = 8;
+ // ---- FALLING ----
+ if (!onSolid && !onLadder && !onRope && !this.isClimbing) {
+ this.vy += GRAVITY;
+ if (this.vy > 8) this.vy = 8;
 
-      const prevBottom = this.prevY + this.height;
-      this.y += this.vy;
-      this.x += this.direction * PLAYER_SPEED * 0.3;
-      this.resolveHorizontalCollision(grid);
+ const prevBottom = this.prevY + this.height;
+ this.y += this.vy;
+ this.x += this.direction * PLAYER_SPEED * 0.3;
+ this.resolveHorizontalCollision(grid);
 
-      const landingResult = this.checkLanding(grid, prevBottom);
-      if (landingResult) {
-        this.y = landingResult.tileTop - this.height;
-        this.vy = 0;
-      }
+ // Auto-grab ladder while falling
+ if (this.isTouchingLadder(grid)) {
+ const ladderCol = this.findLadderCol(grid);
+ if (ladderCol >= 0) {
+ this.isClimbing = true;
+ this.vy = dy > 0 ? ENEMY_CLIMB_SPEED : -ENEMY_CLIMB_SPEED;
+ // Snap to ladder center
+ this.x = ladderCol * TILE_SIZE + (TILE_SIZE - this.width) / 2;
+ this.updateAnimation();
+ return;
+ }
+ }
 
-      if (this.y > TILE_SIZE * (GRID_ROWS + 1)) {
-        this.alive = false;
-      }
-      this.updateAnimation();
-      return;
-    }
+ const landingResult = this.checkLanding(grid, prevBottom);
+ if (landingResult) {
+ this.y = landingResult.tileTop - this.height;
+ this.vy = 0;
+ }
+
+ if (this.y > TILE_SIZE * (GRID_ROWS + 1)) {
+ this.alive = false;
+ }
+ this.updateAnimation();
+ return;
+ }
 
     // ---- ON ROPE ----
     if (onRope && !this.isClimbing) {
@@ -131,10 +144,22 @@ export class Enemy {
       return;
     }
 
-    // ---- ON SOLID GROUND (walking) ----
-    this.vy = 0;
+ // ---- ON SOLID GROUND (walking) ----
+ this.vy = 0;
 
-    if (sameFloor) {
+ // If no solid ground below and there's a ladder, start climbing down
+ if (!this.isOnSolid(grid) && this.isLadderBelow(grid)) {
+ this.isClimbing = true;
+ this.climbTargetRow = playerRow;
+ this.vy = ENEMY_CLIMB_SPEED;
+ this.y += this.vy;
+ // Snap to ladder center
+ this.snapToLadderCenter(grid);
+ this.updateAnimation();
+ return;
+ }
+
+ if (sameFloor) {
       // Same floor as player — chase directly
       this.direction = dx > 0 ? 1 : -1;
       this.vx = this.direction * ENEMY_SPEED;
@@ -324,18 +349,53 @@ export class Enemy {
     return grid[row][col];
   }
 
-  isTouchingLadder(grid) {
-    const centerX = this.x + this.width / 2;
-    const topY = this.y + 2;
-    const bottomY = this.y + this.height - 2;
-    const col = Math.floor(centerX / TILE_SIZE);
-    const rowTop = Math.floor(topY / TILE_SIZE);
-    const rowBot = Math.floor(bottomY / TILE_SIZE);
-    for (let r = rowTop; r <= rowBot; r++) {
-      if (this.getTileAt(col, r, grid) === TILE.LADDER) return true;
-    }
-    return false;
-  }
+ isTouchingLadder(grid) {
+ const centerX = this.x + this.width / 2;
+ const topY = this.y + 2;
+ const bottomY = this.y + this.height - 2;
+ const col = Math.floor(centerX / TILE_SIZE);
+ const rowTop = Math.floor(topY / TILE_SIZE);
+ const rowBot = Math.floor(bottomY / TILE_SIZE);
+ for (let r = rowTop; r <= rowBot; r++) {
+ if (this.getTileAt(col, r, grid) === TILE.LADDER) return true;
+ }
+ return false;
+ }
+
+ // Find the ladder column the enemy is currently touching
+ findLadderCol(grid) {
+ const centerX = this.x + this.width / 2;
+ const topY = this.y + 2;
+ const bottomY = this.y + this.height - 2;
+ const col = Math.floor(centerX / TILE_SIZE);
+ const rowTop = Math.floor(topY / TILE_SIZE);
+ const rowBot = Math.floor(bottomY / TILE_SIZE);
+
+ for (let r = rowTop; r <= rowBot; r++) {
+ if (this.getTileAt(col, r, grid) === TILE.LADDER) return col;
+ }
+ for (let c = col - 1; c <= col + 1; c++) {
+ if (c < 0 || c >= (grid[0] ? grid[0].length : 0)) continue;
+ for (let r = rowTop; r <= rowBot; r++) {
+ if (this.getTileAt(c, r, grid) === TILE.LADDER) return c;
+ }
+ }
+ return -1;
+ }
+
+ // Check if there is a ladder tile directly below the enemy's feet
+ isLadderBelow(grid) {
+ const bottom = this.y + this.height;
+ const row = Math.floor(bottom / TILE_SIZE);
+ const left = this.x + 2;
+ const right = this.x + this.width - 2;
+ const colL = Math.floor(left / TILE_SIZE);
+ const colR = Math.floor(right / TILE_SIZE);
+ for (let c = colL; c <= colR; c++) {
+ if (this.getTileAt(c, row, grid) === TILE.LADDER) return true;
+ }
+ return false;
+ }
 
   isOnSolid(grid) {
     const bottom = this.y + this.height;

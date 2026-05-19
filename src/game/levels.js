@@ -1,22 +1,23 @@
 import { TILE, GRID_ROWS, GRID_COLS } from './constants';
 
 // Level 1 - Tutorial level
-// All floors connected by ladders, all gold reachable
-// Ladders extend through floors so enemies can navigate between levels
+// Main ladder at col 8 connects to rope section
+// Top floor extends right to reach the ladder
+// Gold positioned near center of screen
 const level1 = [
   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], // row 0 - ceiling
-  [1,5,0,0,4,0,0,0,0,0,0,0,0,0,4,0,0,0,0,1], // row 1 - top floor, spawn + gold
-  [1,1,8,1,1,2,0,0,0,0,0,0,0,0,0,0,0,8,1,1], // row 2 - floor (ladder at col 5 connects down)
-  [0,0,0,0,0,2,0,0,3,3,3,3,3,0,0,0,0,0,0,0], // row 3 - rope section
-  [0,4,0,0,0,2,0,0,0,0,0,0,0,0,0,0,4,0,0,0], // row 4 - gold
-  [1,1,1,8,1,2,0,0,0,0,0,0,0,0,8,1,1,0,0,0], // row 5 - floor (ladder at col 5)
-  [0,0,0,0,0,2,0,0,0,4,0,0,0,0,0,0,0,0,0,0], // row 6 - gold
-  [0,0,0,0,0,2,0,0,0,0,0,3,3,3,3,0,0,0,0,0], // row 7 - rope section
-  [0,4,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,4,0,0], // row 8 - gold
-  [1,1,1,1,8,2,0,0,0,0,0,0,0,0,0,1,8,1,1,0], // row 9 - floor
-  [0,0,0,0,0,2,0,0,4,0,0,0,0,0,0,0,0,0,0,0], // row 10 - gold
-  [0,0,0,0,0,2,0,0,0,0,0,0,0,0,7,0,0,4,0,0], // row 11 - enemy spawn + gold
-  [0,0,0,0,0,2,4,4,0,0,0,0,0,0,0,0,1,1,6,1], // row 12 - gold + exit
+  [1,5,0,0,0,0,0,0,4,0,0,0,0,0,0,4,0,0,0,1], // row 1 - top floor, spawn + gold near center
+  [1,1,8,1,1,1,1,1,2,0,0,0,0,0,0,0,8,1,1,1], // row 2 - floor extends to col8 (ladder at col 8)
+  [0,0,0,0,0,0,0,0,2,3,3,3,3,3,0,0,0,0,0,0], // row 3 - rope section starts at col8 (connected to ladder!)
+  [0,4,0,0,0,0,0,0,2,0,0,0,0,0,0,0,4,0,0,0], // row 4 - gold
+  [1,1,1,8,1,1,0,0,2,0,0,0,0,0,8,1,1,0,0,0], // row 5 - floor (ladder at col 8)
+  [0,0,0,0,0,0,0,0,2,0,4,0,0,0,0,0,0,0,0,0], // row 6 - gold
+  [0,0,0,0,0,0,0,0,2,0,0,0,3,3,3,0,0,0,0,0], // row 7 - rope section
+  [0,4,0,0,0,0,0,0,2,0,0,0,0,0,0,0,4,0,0,0], // row 8 - gold
+  [1,1,1,1,8,0,0,0,2,0,0,0,0,0,0,1,8,1,1,0], // row 9 - floor
+  [0,0,0,0,0,0,0,0,2,0,4,0,0,0,0,0,0,0,0,0], // row 10 - gold
+  [0,0,0,0,0,0,0,0,2,0,0,0,0,0,7,0,0,4,0,0], // row 11 - enemy spawn + gold
+  [0,0,0,0,0,0,0,0,2,4,4,0,0,0,0,0,1,1,6,1], // row 12 - gold + exit
   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], // row 13 - bottom floor
 ];
 

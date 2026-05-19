@@ -107,12 +107,19 @@ export class Player {
     this.x += this.vx;
     this.resolveHorizontalCollision(grid);
 
-    // Ground check - if no solid below, start falling
-    if (!this.isOnSolid(grid)) {
-      this.state = PLAYER_STATE.FALLING;
-      this.onGround = false;
-      this.vy = 0;
-    }
+ // Ground check - if no solid below, check for ladder first
+ if (!this.isOnSolid(grid)) {
+ // If there's a ladder below, start climbing down instead of falling
+ if (this.isLadderBelow(grid)) {
+ this.state = PLAYER_STATE.CLIMBING;
+ this.onGround = false;
+ this.vy = CLIMB_SPEED;
+ } else {
+ this.state = PLAYER_STATE.FALLING;
+ this.onGround = false;
+ this.vy = 0;
+ }
+ }
   }
 
   handleClimbing(keys, grid) {
@@ -255,12 +262,20 @@ export class Player {
       this.vx *= 0.9;
     }
 
-    // Grab ladder while falling
-    if (keys.up && this.isTouchingLadder(grid)) {
-      this.state = PLAYER_STATE.CLIMBING;
-      this.vy = 0;
-      return;
-    }
+ // Grab ladder while falling (automatic when passing through)
+ if (this.isTouchingLadder(grid)) {
+ // Only auto-grab if player is roughly centered on the ladder column
+ const centerX = this.x + this.width / 2;
+ const col = Math.floor(centerX / TILE_SIZE);
+ const ladderCol = this.findLadderColumn(grid);
+ if (ladderCol >= 0 && Math.abs(centerX - (ladderCol * TILE_SIZE + TILE_SIZE / 2)) < TILE_SIZE * 0.6) {
+ this.state = PLAYER_STATE.CLIMBING;
+ this.vy = keys.down ? CLIMB_SPEED : 0;
+ // Snap to ladder center
+ const targetX = ladderCol * TILE_SIZE + (TILE_SIZE - this.width) / 2;
+ this.x = targetX;
+ }
+ }
 
     const prevBottom = this.prevY + this.height;
     this.x += this.vx;
@@ -347,20 +362,58 @@ export class Player {
     return grid[row][col];
   }
 
-  isTouchingLadder(grid) {
-    const centerX = this.x + this.width / 2;
-    const topY = this.y + 2;
-    const bottomY = this.y + this.height - 2;
-    const col = Math.floor(centerX / TILE_SIZE);
-    const rowTop = Math.floor(topY / TILE_SIZE);
-    const rowBot = Math.floor(bottomY / TILE_SIZE);
-    for (let r = rowTop; r <= rowBot; r++) {
-      if (this.getTileAt(col, r, grid) === TILE.LADDER) return true;
-    }
-    return false;
-  }
+ isTouchingLadder(grid) {
+ const centerX = this.x + this.width / 2;
+ const topY = this.y + 2;
+ const bottomY = this.y + this.height - 2;
+ const col = Math.floor(centerX / TILE_SIZE);
+ const rowTop = Math.floor(topY / TILE_SIZE);
+ const rowBot = Math.floor(bottomY / TILE_SIZE);
+ for (let r = rowTop; r <= rowBot; r++) {
+ if (this.getTileAt(col, r, grid) === TILE.LADDER) return true;
+ }
+ return false;
+ }
 
-  isOnSolid(grid) {
+ // Find the ladder column the player is currently touching
+ findLadderColumn(grid) {
+ const centerX = this.x + this.width / 2;
+ const topY = this.y + 2;
+ const bottomY = this.y + this.height - 2;
+ const col = Math.floor(centerX / TILE_SIZE);
+ const rowTop = Math.floor(topY / TILE_SIZE);
+ const rowBot = Math.floor(bottomY / TILE_SIZE);
+
+ // Check current column first
+ for (let r = rowTop; r <= rowBot; r++) {
+ if (this.getTileAt(col, r, grid) === TILE.LADDER) return col;
+ }
+ // Check adjacent columns
+ for (let c = col - 1; c <= col + 1; c++) {
+ if (c < 0 || c >= (grid[0] ? grid[0].length : 0)) continue;
+ for (let r = rowTop; r <= rowBot; r++) {
+ if (this.getTileAt(c, r, grid) === TILE.LADDER) return c;
+ }
+ }
+ return -1;
+ }
+
+  // Check if there is a ladder tile directly below the player's feet
+ isLadderBelow(grid) {
+ const bottom = this.y + this.height;
+ const row = Math.floor(bottom / TILE_SIZE);
+ const left = this.x + 2;
+ const right = this.x + this.width - 2;
+ const colL = Math.floor(left / TILE_SIZE);
+ const colR = Math.floor(right / TILE_SIZE);
+
+ for (let c = colL; c <= colR; c++) {
+ if (this.getTileAt(c, row, grid) === TILE.LADDER) return true;
+ }
+ return false;
+ }
+
+ isOnSolid(grid) {
     const bottom = this.y + this.height;
     const row = Math.floor(bottom / TILE_SIZE);
     const left = this.x + 2;
